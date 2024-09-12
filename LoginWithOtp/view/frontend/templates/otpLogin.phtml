@@ -1,0 +1,202 @@
+<style>
+    #otp-login-popup {
+        width: 40%;
+        padding: 20px;
+        border: 1px solid #f9f9f9;
+        border-radius: 5px;
+        /* background-color: #f9f9f9; */
+    }
+
+    #otp-login-popup .emailLabel,
+    #otp-login-popup .otpLabel {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 5px;
+    }
+
+    #otp-login-popup input[type="email"],
+    #otp-login-popup input[type="number"] {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+    }
+
+    #otp-field,
+    #otp-timer {
+        margin-top: 20px;
+    }
+
+    .error-message,
+    .otp-error-message {
+        color: red;
+        font-size: 12px;
+        margin-top: -10px;
+        margin-bottom: 10px;
+        display: none;
+    }
+</style>
+
+<div class="otp-login-popup" id="otp-login-popup" style="display: none;">
+    <label for="email" class="emailLabel">Email:</label>
+    <input type="email" name="email" id="otp-email" placeholder="Enter Your Email" required>
+    <span class="error-message" id="error-message"></span>
+    <div class="primary">
+        <button type="submit" class="action primary" id="otp-email-btn">Submit</button>
+    </div>
+
+    <div id="otp-field" style="display: none;">
+        <label for="otp" class="otpLabel">Enter OTP:</label>
+        <input type="number" name="otp" required>
+        <span class="otp-error-message" id="otp-error-message"></span>
+        <div class="primary">
+            <button id="verify-otp" type="button" class="action primary">Verify OTP</button>
+        </div>
+    </div>
+    <div id="otp-timer"></div>
+</div>
+
+
+<script>
+    require([
+        'jquery',
+        'Magento_Ui/js/modal/modal',
+        'Magento_Ui/js/modal/alert',
+        'mage/storage',
+        'mage/url'
+    ], function(
+        $,
+        modal,
+        alert,
+        storage,
+        urlBuilder
+    ) {
+        $(document).ready(function() {
+            var otp = {
+                type: 'popup',
+                responsive: true,
+                innerScroll: true,
+                title: $.mage.__('Login With OTP'),
+                buttons: [{
+                    text: $.mage.__('Close'),
+                    click: function() {
+                        $('#otp-login-popup').modal("closeModal");
+                    }
+                }]
+            };
+
+            var alertMsg = {
+                alert: function(message, title) {
+                    title = (typeof title == "undefined") ? "" : title;
+                    alert({
+                        title: title,
+                        content: message,
+                        actions: {
+                            always: function(){}
+                        }
+                    });
+                }
+            };
+
+            function isValidEmail(email) {
+                var emailPattern = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9]+\.[a-zA-Z]{2,6}$/;
+                return emailPattern.test(email);
+            }
+
+            $('#otp-email-btn').click(function() {
+                var email = $('#otp-email').val();
+                var errorMessage = $('#error-message');
+
+                errorMessage.hide();
+
+                if(email == ''){
+                    errorMessage.text('This is a required field.').show();
+                } else if (!isValidEmail(email)) {
+                    errorMessage.text('Please enter a valid email address.').show();
+                } else {
+                    $('body').loader('show');
+                    $.ajax({
+                        url: urlBuilder.build("loginwithotp/otp/sendOtp"),
+                        type: 'POST',
+                        data: {
+                            email: email
+                        },
+                        success: function(response) {
+                            $('body').loader('hide');
+                            if (response.success) {
+                                $('#otp-field').show();
+                                startCountdown(response.expiry);
+                            } else {
+                                errorMessage.text(email + ' is not registered email').show();
+                            }
+                        },
+                        error: function() {
+                            alertMsg.alert('Oops! something went wrong..');
+                        }
+                    });
+                }
+            });
+
+            $('#login-with-otp').click(function() {
+                $('#otp-login-popup').modal(otp).modal("openModal");
+            });
+
+            $('#verify-otp').click(function() {
+                var email = $('#otp-email').val();
+                var otp = $('input[name="otp"]').val();
+                var otpErrorMessage = $('#otp-error-message');
+
+                otpErrorMessage.hide();
+                
+                if(otp == '') {
+                    otpErrorMessage.text('This is a required field.').show();
+                } else {
+                    $.ajax({
+                        url: urlBuilder.build("loginwithotp/otp/verifyOtp"),
+                        type: 'POST',
+                        data: {
+                            email: email,
+                            otp: otp
+                        },
+                        success: function(response) {
+                            if (response.success) {
+                                window.location.href = '<?= $block->getUrl('customer/account') ?>';
+                            } else {
+                                otpErrorMessage.text('Invalid OTP').show();
+                            }
+                        },
+                        error: function() {
+                            alertMsg.alert('Oops! something went wrong..');
+                        }
+                    });
+                }
+            });
+
+            function startCountdown(expiryTime) {
+                var countdownElement = $('#otp-timer');
+                var expiryOtpTime = expiryTime * 1000;
+
+                var countdownInterval = setInterval(function() {
+                    var currentTime = new Date().getTime();
+                    var distance = expiryOtpTime - currentTime;
+                    console.log('distance ' + distance);
+                    if (distance > 0) {
+                        var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                        var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+                        if(minutes < 1) {
+                            countdownElement.text('OTP Expire in : ' + seconds + "s ");
+                        } else {
+                            countdownElement.text('OTP Expire in : ' + minutes + "m " + seconds + "s ");
+                        }
+                    } else {
+                        clearInterval(countdownInterval);
+                        countdownElement.text("EXPIRED");                        
+                    }
+                });
+            }
+        });
+    });
+</script>
